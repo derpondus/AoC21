@@ -1,3 +1,5 @@
+import Dot.Companion.toDot
+import FoldInstruction.Companion.toFoldInstruction
 import java.io.BufferedReader
 import java.io.FileReader
 import java.lang.reflect.Modifier
@@ -9,10 +11,11 @@ import kotlin.math.max
 import kotlin.reflect.KFunction
 import kotlin.reflect.jvm.javaMethod
 import kotlin.reflect.jvm.kotlinFunction
+import kotlin.system.exitProcess
 import kotlin.time.ExperimentalTime
 import kotlin.time.measureTime
 
-val daysToRun: List<Int> = listOf()
+val daysToRun: List<Int> = listOf(13)
 
 //region main
 @ExperimentalTime
@@ -635,7 +638,7 @@ class CaveMap(private val heightmap: List<List<Int>>) {
         override fun compareTo(other: HeightPosition): Int = height - other.height
         override fun toString() = "P($x,$y,$height)"
         override fun equals(other: Any?): Boolean = if(other is HeightPosition) (x == other.x) && (y == other.y) else false
-        override fun hashCode(): Int = 31 * x + y
+        override fun hashCode(): Int = (31 * (31 * 0 + x) + y)
     }
 
     class Basin(val low: HeightPosition, heightmap: List<List<Int>>) {
@@ -681,17 +684,139 @@ fun day11() {}
 //endregion
 //region Day12
 
-fun day12() {}
+fun day12() {
+    val caveList = mutableListOf<Cave>()
+    BufferedReader(FileReader("./src/main/resources/day12.txt")).readLines()
+        .map { line -> line.split("-")
+            .map { name -> caveList.find { it.name == name } ?: Cave(name).also {
+                if(name.first().isUpperCase()) it.isBig = true
+                caveList.add(it)
+            } }
+            .run { get(0) to get(1) }
+        }
+        .forEach {
+            it.first.connected.add(it.second)
+            it.second.connected.add(it.first)
+        }
+
+    val start = caveList.find { it.name == "start" } ?: exitProcess(1)
+    val end = caveList.find { it.name == "end" } ?: exitProcess(1)
+    println("No small visiting: ${start.pathsTo(end).size}")
+    println("A bit small visiting: ${start.pathsTo(end, allowSmallRepetitionOnce = true).size}")
+}
+
+class Cave(val name: String) {
+    var isBig: Boolean = false
+    val connected: MutableList<Cave> = mutableListOf()
+
+    fun pathsTo(target: Cave, toIgnore: List<Cave> = emptyList(), allowSmallRepetitionOnce: Boolean = false): MutableList<MutableList<Cave>> {
+        //println("$this, $target, $toIgnore")
+        if(target == this) return mutableListOf(mutableListOf(this))
+        return connected.filter { nextCave -> nextCave.name != "start" && (nextCave.isBig || allowSmallRepetitionOnce || !toIgnore.contains(nextCave)) }
+            .flatMap { nextCave ->
+                nextCave.pathsTo(target, if(!isBig) toIgnore + this else toIgnore, allowSmallRepetitionOnce && !toIgnore.contains(nextCave))
+                    .map { it.add(0, this); it }
+            }
+            .toMutableList()
+    }
+
+    override fun toString(): String = "Cave(name='$name')"
+    override fun equals(other: Any?): Boolean =
+        if(other is Cave) name == other.name
+        else super.equals(other)
+    override fun hashCode(): Int {
+        var result = name.hashCode()
+        result = 31 * result + isBig.hashCode()
+        result = 31 * result + connected.hashCode()
+        return result
+    }
+}
+
+
 
 //endregion
 //region Day13
 
-fun day13() {}
+fun day13() {
+    val lineList = BufferedReader(FileReader("./src/main/resources/day13.txt")).readLines()
+    val dots = lineList.filter { it.firstOrNull()?.isDigit() == true }.map { it.toDot() }
+    val foldInstructions = lineList.filter { it.firstOrNull() == 'f' }.map { it.split(" ").last().toFoldInstruction() }
+    val firstFoldInstruction = foldInstructions.first()
+
+    fun List<Dot>.applyFoldInstruction(instruction: FoldInstruction): List<Dot> {
+        return map { it.clone().fold(instruction) }.groupBy { it }.keys.toList()
+    }
+    fun List<Dot>.applyFoldInstructions(instructions: List<FoldInstruction>): List<Dot> {
+        return instructions.fold(this) { currDotList, foldInstruction -> currDotList.applyFoldInstruction(foldInstruction) }
+    }
+    fun List<Dot>.visualize(dot: String = "##", noDot: String = "  ") {
+        val maxX = maxOf { it.x }
+        val maxY = maxOf { it.y }
+        for(y in 0..maxY) {
+            for(x in 0..maxX) {
+                if(find { it.x == x && it.y == y } != null) print(dot)
+                else print(noDot)
+            }
+            println()
+        }
+    }
+
+    println("DotNum after first fold: ${dots.applyFoldInstruction(firstFoldInstruction).size}")
+    println("Dots after all folds:")
+    dots.applyFoldInstructions(foldInstructions).visualize("██", "  ")
+}
+
+class Dot(var x: Int, var y: Int) {
+    companion object { fun String.toDot() = split(",").run { Dot(get(0).toInt(), get(1).toInt()) } }
+
+    fun fold(instruction: FoldInstruction): Dot {
+        when(instruction.axis) {
+            FoldAxis.X -> x = foldComponent(x, instruction.pos)
+            FoldAxis.Y -> y = foldComponent(y, instruction.pos)
+        }
+        return this
+    }
+
+    private fun foldComponent(oldValue: Int, foldPos: Int): Int {
+        if(oldValue < foldPos) return oldValue
+        return 2*foldPos - oldValue
+    }
+
+    fun clone(): Dot = Dot(x, y)
+    override fun toString(): String = "Dot[$x,$y]"
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as Dot
+
+        if (x != other.x) return false
+        if (y != other.y) return false
+
+        return true
+    }
+    override fun hashCode(): Int {
+        var result = x
+        result = 31 * result + y
+        return result
+    }
+
+
+}
+class FoldInstruction(val axis: FoldAxis, val pos: Int) {
+    companion object { fun String.toFoldInstruction() = split("=").run { FoldInstruction(FoldAxis.valueOf(get(0).uppercase()), get(1).toInt()) } }
+}
+
+enum class FoldAxis { X,Y }
 
 //endregion
 //region Day14
 
-fun day14() {}
+fun day14() {
+    val lineList = BufferedReader(FileReader("./src/main/resources/day14.txt")).readLines()
+
+
+}
 
 //endregion
 //region Day15
