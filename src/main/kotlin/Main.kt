@@ -1,9 +1,17 @@
 import Dot.Companion.toDot
 import FoldInstruction.Companion.toFoldInstruction
+import InsertionRule.Companion.toInsertionRule
+import io.ktor.client.*
+import io.ktor.client.engine.cio.*
+import io.ktor.client.request.*
+import io.ktor.utils.io.errors.*
+import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
+import java.io.File
 import java.io.FileReader
+import java.lang.AssertionError
 import java.lang.reflect.Modifier
-import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.min
@@ -15,32 +23,36 @@ import kotlin.system.exitProcess
 import kotlin.time.ExperimentalTime
 import kotlin.time.measureTime
 
-val daysToRun: List<Int> = listOf(13)
+const val eventID: String = "2021"
+val daysToRun: List<Int> = listOf(11)
 
 //region main
+const val sessionCookiePropertyID = "sessionCookie"
+
 @ExperimentalTime
 fun main(args: Array<String>) {
     (
             if(args.isNotEmpty()) args.map { it.toInt() }
             else if(daysToRun.isNotEmpty()) daysToRun
-            else listOf( LocalDate.now().dayOfMonth )
+            else listOf( LocalDateTime.now().minusHours(6).dayOfMonth )
     )
-    .map { it.coerceIn(1..24) }
-    .forEach {
-        println("-".repeat(50))
-        println("Day $it")
-        val func: KFunction<*>? = getFunctionFromFile("Main", "day$it")
-            ?: getFunctionFromFile("Day$it", "day$it")
-            ?: run { println("Method not found"); null }
-        val time = measureTime {
-            func?.call()
-        }
-        println(time.toComponents { hours, minutes, seconds, nanoseconds -> "Exec Time: " +
-                "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:" +
-                "${seconds.toString().padStart(2, '0')}.${nanoseconds.toString().padStart(9, '0')}"
-        })
-        println()
-    }
+    .map { it.coerceIn(1..25) }
+    .forEach { executeDay(it) }
+}
+
+@ExperimentalTime
+fun executeDay(day: Int) {
+    println("-".repeat(50))
+    println("Day $day")
+    val func: KFunction<*>? = getFunctionFromFile("Main", "day$day")
+        ?: getFunctionFromFile("Day$day", "day$day")
+        ?: run { println("Method not found for day: $day"); null }
+    val time = if(func?.parameters?.size == 1) measureTime { func.call(loadDataForDay(day)) } else measureTime { func?.call() }
+    println(time.toComponents { hours, minutes, seconds, nanoseconds -> "Exec Time: " +
+            "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:" +
+            "${seconds.toString().padStart(2, '0')}.${nanoseconds.toString().padStart(9, '0')}"
+    })
+    println()
 }
 
 fun getFunctionFromFile(fileName: String, funcName: String): KFunction<*>? {
@@ -51,12 +63,35 @@ fun getFunctionFromFile(fileName: String, funcName: String): KFunction<*>? {
     return javaMethod?.kotlinFunction
 }
 
+fun loadDataForDay(day: Int): List<String> {
+    val inputFile = File("./src/main/resources/day$day.txt")
+    inputFile.parentFile.mkdirs()
+    if(!inputFile.createNewFile()) return BufferedReader(FileReader("./src/main/resources/day1.txt")).readLines()
+    val lines = ServerConnector.loadData(day)
+    inputFile.writeText(lines.joinToString("\n"))
+    return lines
+}
+
+object ServerConnector {
+    private val httpClient = HttpClient(CIO)
+
+    fun loadData(day: Int): List<String> {
+        println("[Loading Input from Server]")
+        var response: String
+        runBlocking {
+            response =
+                httpClient.get("https://adventofcode.com/$eventID/day/$day/input") {
+                    cookie("session", System.getenv(sessionCookiePropertyID))
+                }
+        }
+        return response.split("\n").run { subList(0,size-1) }
+    }
+}
+
 //endregion
 //region Day1
 
-fun day1() {
-    val inputLines = BufferedReader(FileReader("./src/main/resources/day1.txt")).readLines()
-
+fun day1(inputLines: List<String>) {
     println("Part1: ${calcDay1(inputLines, 1)}")
     println("Part2: ${calcDay1(inputLines, 3)}")
 }
@@ -72,11 +107,11 @@ fun calcDay1(inputLines: List<String>, windowSize: Int = 1): Int {
 //endregion
 //region Day2
 
-fun day2() {
-    val inputLines = BufferedReader(FileReader("./src/main/resources/day2.txt")).readLines().map { it.split(" ") }
+fun day2(inputLines: List<String>) {
+    val instructions = inputLines.map { it.split(" ") }
 
-    calcPath(inputLines, true)
-    calcPath(inputLines, false)
+    calcPath(instructions, true)
+    calcPath(instructions, false)
 }
 
 fun calcPath(inputLines: List<List<String>>, part1: Boolean = true) {
@@ -100,9 +135,7 @@ fun calcPath(inputLines: List<List<String>>, part1: Boolean = true) {
 //endregion
 //region Day3
 
-fun day3() {
-    val inputLines = BufferedReader(FileReader("./src/main/resources/day3.txt")).readLines()
-
+fun day3(inputLines: List<String>) {
     println("Power Consumption: ${calcPowerConsumption(inputLines)}")
     println("Live Support: ${calcLiveSupportRating(inputLines)}")
 
@@ -173,8 +206,7 @@ fun mostBitAtIndex(input: List<String>, index: Int): Int {
 //endregion
 //region Day4
 
-fun day4() {
-    val inputLines = BufferedReader(FileReader("./src/main/resources/day4.txt")).readLines()
+fun day4(inputLines: List<String>) {
     val drawList = inputLines[0].split(",").map { it.toInt() }
     val boardList = inputLines
         .subList(1, inputLines.size)
@@ -255,8 +287,8 @@ class Board(input: List<MutableList<Int>>) {
 //endregion
 //region Day5
 
-fun day5() {
-    val lineList = BufferedReader(FileReader("./src/main/resources/day5.txt")).readLines().map { Line.of(it) }
+fun day5(inputLines: List<String>) {
+    val lineList = inputLines.map { Line.of(it) }
 
     SubmarineMap().run {
         lineList.forEach { addLine(it, true) }
@@ -383,8 +415,8 @@ fun List<Long>.calcFuelTriangular(mean : Int) = sumOf { abs(mean.toLong() - it)*
 //endregion
 //region Day8
 
-fun day8() {
-    val lineList = BufferedReader(FileReader("./src/main/resources/day8.txt")).readLines().splitToSegmentListStruct()
+fun day8(inputLines: List<String>) {
+    val lineList = inputLines.splitToSegmentListStruct()
 
     val targetNumsDecoded = lineList.map { (allNumsEncoded, targetNumsEncoded) ->
         val allNumsDecoded = allNumsEncoded.map { SegmentDigit(it) }.decode()
@@ -605,8 +637,8 @@ fun possibleNumbers(segments: String, ): List<Int> {
 //endregion
 //region Day9
 
-fun day9() {
-    val caveMap = CaveMap(BufferedReader(FileReader("./src/main/resources/day9.txt")).readLines().map { it.chunked(1).map { it.toInt() } })
+fun day9(inputLines: List<String>) {
+    val caveMap = CaveMap(inputLines.map { it.chunked(1).map { it.toInt() } })
 
     println("LocalLows: ${caveMap.localLows().sumOf { it.height + 1 }}")
     println("Basins: ${caveMap.basins().map { it.size }.sortedDescending().take(3).reduce(Int::times)}")
@@ -670,34 +702,28 @@ class CaveMap(private val heightmap: List<List<Int>>) {
 //endregion
 //region Day10
 
-fun day10() {
-    val lineList = BufferedReader(FileReader("./src/main/resources/day10.txt")).readLines()
-
-
-}
+fun day10(inputLines: List<String>) {}
 
 //endregion
 //region Day11
 
-fun day11() {}
+fun day11(inputLines: List<String>) {}
 
 //endregion
 //region Day12
 
-fun day12() {
+fun day12(inputLines: List<String>) {
     val caveList = mutableListOf<Cave>()
-    BufferedReader(FileReader("./src/main/resources/day12.txt")).readLines()
-        .map { line -> line.split("-")
-            .map { name -> caveList.find { it.name == name } ?: Cave(name).also {
-                if(name.first().isUpperCase()) it.isBig = true
-                caveList.add(it)
-            } }
-            .run { get(0) to get(1) }
-        }
-        .forEach {
-            it.first.connected.add(it.second)
-            it.second.connected.add(it.first)
-        }
+    inputLines.map { line -> line.split("-")
+        .map { name -> caveList.find { it.name == name } ?: Cave(name).also {
+            if(name.first().isUpperCase()) it.isBig = true
+            caveList.add(it)
+        } }
+        .run { get(0) to get(1) }
+    }.forEach {
+        it.first.connected.add(it.second)
+        it.second.connected.add(it.first)
+    }
 
     val start = caveList.find { it.name == "start" } ?: exitProcess(1)
     val end = caveList.find { it.name == "end" } ?: exitProcess(1)
@@ -737,10 +763,11 @@ class Cave(val name: String) {
 //endregion
 //region Day13
 
-fun day13() {
-    val lineList = BufferedReader(FileReader("./src/main/resources/day13.txt")).readLines()
-    val dots = lineList.filter { it.firstOrNull()?.isDigit() == true }.map { it.toDot() }
-    val foldInstructions = lineList.filter { it.firstOrNull() == 'f' }.map { it.split(" ").last().toFoldInstruction() }
+operator fun String.times(n: Int) = repeat(n)
+
+fun day13(inputLines: List<String>) {
+    val dots = inputLines.filter { it.firstOrNull()?.isDigit() == true }.map { it.toDot() }
+    val foldInstructions = inputLines.filter { it.firstOrNull() == 'f' }.map { it.split(" ").last().toFoldInstruction() }
     val firstFoldInstruction = foldInstructions.first()
 
     fun List<Dot>.applyFoldInstruction(instruction: FoldInstruction): List<Dot> {
@@ -749,7 +776,7 @@ fun day13() {
     fun List<Dot>.applyFoldInstructions(instructions: List<FoldInstruction>): List<Dot> {
         return instructions.fold(this) { currDotList, foldInstruction -> currDotList.applyFoldInstruction(foldInstruction) }
     }
-    fun List<Dot>.visualize(dot: String = "##", noDot: String = "  ") {
+    fun List<Dot>.visualize(dot: String = "##", noDot: String = " "*dot.length) {
         val maxX = maxOf { it.x }
         val maxY = maxOf { it.y }
         for(y in 0..maxY) {
@@ -763,7 +790,7 @@ fun day13() {
 
     println("DotNum after first fold: ${dots.applyFoldInstruction(firstFoldInstruction).size}")
     println("Dots after all folds:")
-    dots.applyFoldInstructions(foldInstructions).visualize("██", "  ")
+    dots.applyFoldInstructions(foldInstructions).visualize("██")
 }
 
 class Dot(var x: Int, var y: Int) {
@@ -812,62 +839,350 @@ enum class FoldAxis { X,Y }
 //endregion
 //region Day14
 
-fun day14() {
-    val lineList = BufferedReader(FileReader("./src/main/resources/day14.txt")).readLines()
+fun day14(inputLines: List<String>) {
+    val template = inputLines.first()
+    val insertionRules = inputLines.filter { it.contains(" -> ") }.map { it.toInsertionRule() }
+    /*fun String.applyInsertionRules(insertionRules: List<InsertionRule>): String {
+        val stringBuilder = StringBuilder()
+        stringBuilder.append(get(0))
+        for(i in 0..length-2) {
+            stringBuilder.append(insertionRules.filter { it.left == get(i) && it.right == get(i+1)}.first().mid)
+            stringBuilder.append(get(i+1))
+        }
+        return stringBuilder.toString()
+    }
+    fun String.repeatInsertionRules(n: Int, insertionRules: List<InsertionRule>): String {
+        var returnValue = this
+        for(i in 1..n) {
+            print("It: $i ... ")
+            returnValue = returnValue.applyInsertionRules(insertionRules)
+            println("DONE")
+        }
+        return returnValue
+    }
 
+    val after10Times = template.repeatInsertionRules(10, insertionRules)
+    val after10TimesCharCount = after10Times.toCharArray().groupBy { it }.mapValues { it.value.size }
+
+    println("Part1: ${after10TimesCharCount.maxOf { it.value } - after10TimesCharCount.minOf { it.value }}")*/
+    val polymerState = PolymerState(
+        (0..template.length-2).map { template.substring(it..it+1) }.toMutableCounter(),
+        template.toCharArray().toMutableCounter()
+    )
+
+    polymerState.simulateGrowth(10, insertionRules)
+    println("After 10 iterations: ${polymerState.calcMetric()}")
+    polymerState.simulateGrowth(30, insertionRules)
+    println("After 40 iterations: ${polymerState.calcMetric()}")
 
 }
+
+fun <T> Iterable<T>.toCounter() = groupBy { it }.mapValues { it.value.size.toLong() }
+fun <T> Iterable<T>.toMutableCounter() = toCounter().toMutableMap()
+fun CharArray.toCounter() = groupBy { it }.mapValues { it.value.size.toLong() }
+fun CharArray.toMutableCounter() = toCounter().toMutableMap()
+
+class PolymerState(private var insertionPairCount: MutableMap<String, Long>, private val charCount: MutableMap<Char, Long>) {
+    private fun simulateGrowth(insertionRules: List<InsertionRule>) {
+        val tempIPC: MutableMap<String, Long> = mutableMapOf()
+        insertionPairCount.forEach { entry ->
+            val iRule = insertionRules.find { it.getTarget() == entry.key }
+            if(iRule != null) {
+                tempIPC.saveAdd(iRule.getLeftReplPair(), entry.value)
+                tempIPC.saveAdd(iRule.getRightReplPair(), entry.value)
+                charCount.saveAdd(iRule.mid, entry.value)
+            } else {
+                tempIPC[entry.key] = tempIPC.getOrDefault(entry.key, 0).plus(entry.value)
+            }
+        }
+        insertionPairCount = tempIPC
+    }
+    fun simulateGrowth(iterations: Int, insertionRules: List<InsertionRule> ) {
+        for(i in 1..iterations) {
+            simulateGrowth(insertionRules)
+        }
+    }
+    fun calcMetric() = charCount.maxOf { it.value } - charCount.minOf { it.value }
+
+    private fun <K> MutableMap<K, Long>.saveAdd(key: K, value: Long) { set(key, getOrDefault(key, 0).plus(value)) }
+}
+
+class InsertionRule(val left: Char, val right: Char, val mid: Char) {
+    companion object { fun String.toInsertionRule() = this.toCharArray().filter { it.isUpperCase() }.run { InsertionRule(get(0), get(1), get(2)) } }
+    fun getTarget() = "$left$right"
+    fun getLeftReplPair() = "$left$mid"
+    fun getRightReplPair() = "$mid$right"
+}
+
 
 //endregion
 //region Day15
 
-fun day15() {}
+fun day15(inputLines: List<String>) {
+    println("Risk of shortest:")
+
+    val chitonCave = ChitonCave(inputLines.mapIndexed { y, row -> row.toCharArray().toList().mapIndexed() { x, risk -> Chiton(x,y,risk.digitToInt()) } })
+    val start = chitonCave.getChiton(0,0)
+
+    var end = chitonCave.getChiton(chitonCave.width-1, chitonCave.height-1)
+    chitonCave.shortestPath(start, end)
+    println(" -> Small Map: ${end.riskUntilHere}")
+
+    chitonCave.increaseMapSize(5)
+    end = chitonCave.getChiton(chitonCave.width-1, chitonCave.height-1)
+    chitonCave.shortestPath(start, end)
+    println(" -> Large Map: ${end.riskUntilHere}")
+}
+
+class ChitonCave(private var chitonRiskMap: List<List<Chiton>>) {
+
+    fun Chiton.getNeighbors() = listOfNotNull(
+        chitonRiskMap.getOrNull(y-1)?.getOrNull(x),
+        chitonRiskMap.getOrNull(y+1)?.getOrNull(x),
+        chitonRiskMap.getOrNull(y)?.getOrNull(x-1),
+        chitonRiskMap.getOrNull(y)?.getOrNull(x+1),
+    )
+
+    val width get() = chitonRiskMap[0].size
+    val height get() = chitonRiskMap.size
+
+    fun getChiton(x:Int, y:Int) = chitonRiskMap[y][x]
+
+    fun shortestPath(start: Chiton, end: Chiton): Chiton {
+        //Dijkstra
+        start.riskUntilHere = 0
+        val openPaths: MutableSet<Chiton> = mutableSetOf(start)
+        while(openPaths.isNotEmpty()) {
+            val curr = openPaths.minByOrNull { it.riskUntilHere }!!
+            if(!openPaths.remove(curr)) throw AssertionError("has to be removed");
+            curr.visited = true
+            if(curr == end) break
+            curr.getNeighbors().forEach {
+                if(it.visited) return@forEach
+                if(it.riskUntilHere > curr.riskUntilHere + it.risk) {
+                    it.prev = curr
+                    it.riskUntilHere = curr.riskUntilHere + it.risk
+                }
+                openPaths.add(it)
+            }
+        }
+
+        //backtracking
+        var curr = end
+        while(curr != start) {
+            val tempCurr = curr
+            curr = curr.prev!!
+            curr.next = tempCurr
+        }
+
+        return start
+    }
+
+    fun increaseMapSize(n: Int) {
+        val newChitonRiskMap: MutableList<MutableList<Chiton>> = mutableListOf()
+        for(i in 0 until n) {
+            chitonRiskMap.forEach { row ->
+                val line: MutableList<Chiton> = mutableListOf()
+                for(j in 0 until n) {
+                    line.addAll(row.map { Chiton(it.x + j * row.size, it.y + i * chitonRiskMap.size, (it.risk+i+j-1).rem(9)+1) })
+                }
+                newChitonRiskMap.add(line)
+            }
+        }
+        chitonRiskMap = newChitonRiskMap
+    }
+}
+
+class Chiton(val x: Int, val y: Int, val risk: Int) {
+    var prev: Chiton? = null
+    var next: Chiton? = null
+    var riskUntilHere = Int.MAX_VALUE
+    var visited: Boolean = false
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as Chiton
+
+        if (x != other.x) return false
+        if (y != other.y) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = x
+        result = 31 * result + y
+        return result
+    }
+
+    override fun toString(): String {
+        return "Chiton(x=$x, y=$y, risk=$risk, riskUntilHere=$riskUntilHere, visited=$visited, prev=${if(prev != null) "notNull" else "null"}, next=${if(next != null) "notNull" else "null"})"
+    }
+}
 
 //endregion
 //region Day16
 
-fun day16() {}
+fun day16(inputLines: List<String>) {
+    val bitsPackage = BitsPackage.of(inputLines[0].map { it.digitToInt(16).toString(2).padStart(4, '0') }.joinToString("").iterator()) //inputLines[1] SkullZ_Input
+
+    //println(bitsPacket)
+    //println("Formula: ${bitsPacket?.getFormula()}")
+    println("Packet versionSum: ${bitsPackage?.getVersionSum()}")
+    println("Packet Value: ${bitsPackage?.getValue()}")
+}
+
+fun CharIterator.next(len: Int): String? = (0 until len).map { if(hasNext()) next() else return null }.joinToString("")
+
+abstract class BitsPackage(val version: Int) {
+    companion object {
+        fun of(input: CharIterator): BitsPackage? {
+            val version = input.next(3)?.toInt(2) ?: return null
+            val id = input.next(3)?.toInt(2) ?: return null
+
+            return when(id) {
+                4 -> LiteralBitsPackage.of(version, input)
+                else -> OperatorBitsPackage.of(version, input, OperatorType.of(id))
+            }
+        }
+    }
+
+    abstract fun getVersionSum(): Int
+    abstract fun getValue(): Long
+
+    abstract fun getFormula(): String
+    abstract fun getRekSubNum(): Int
+}
+
+
+class LiteralBitsPackage(version: Int, val number: Long): BitsPackage(version) {
+    companion object {
+        fun of(version: Int, input: CharIterator): LiteralBitsPackage? {
+            val numberString: StringBuilder = StringBuilder()
+            var calcNext = true
+            while(calcNext) {
+                val next = input.next(5) ?: return null
+                if(next.elementAt(0) == '0') calcNext = false
+                numberString.append(next.substring(1,next.length))
+            }
+            return LiteralBitsPackage(version, numberString.toString().toLong(2))
+        }
+    }
+
+    override fun getVersionSum() = version
+    override fun getValue(): Long = number
+
+    override fun getRekSubNum(): Int = 1
+    override fun getFormula(): String = number.toString()
+
+    override fun toString(): String = "Literal($number)"
+}
+
+class OperatorBitsPackage(version: Int, val subBitsPackages: List<BitsPackage>, val type: OperatorType): BitsPackage(version) {
+    companion object {
+        fun of(version: Int, input: CharIterator, type: OperatorType): OperatorBitsPackage? {
+            val subBitsPackages: MutableList<BitsPackage> = mutableListOf()
+
+            val isLength = input.next(1)?.equals("0") ?: return null
+            if(isLength) {
+                val length = input.next(15)?.toInt(2) ?: return null
+                val subIterator = input.next(length)?.iterator() ?: return null
+                var calcNext = true
+                while(calcNext) {
+                    val next = of(subIterator)
+                    if(next == null) calcNext = false
+                    else subBitsPackages.add(next)
+                }
+
+            } else {
+                val count = input.next(11)?.toInt(2) ?: return null
+                for(i in 0 until count) { 
+                    of(input)?.let { subBitsPackages.add(it) } ?: println("[WARN] Couldn't parse promised package")
+                }
+            }
+
+            if(subBitsPackages.isEmpty()) return null
+            return OperatorBitsPackage(version, subBitsPackages.toList(), type)
+        }
+    }
+
+
+    override fun getVersionSum() = subBitsPackages.sumOf { it.getVersionSum() } + version
+    override fun getValue(): Long = type.aggregate(subBitsPackages.map { it.getValue() })
+
+    override fun getRekSubNum(): Int = subBitsPackages.sumOf { it.getRekSubNum() } + 1
+    override fun getFormula() = when(type) {
+        OperatorType.SUM -> subBitsPackages.run { if(size == 1) return get(0).getFormula() else joinToString(" + ", "(", ")") { it.getFormula() } }
+        OperatorType.PRODUCT -> subBitsPackages.run { if(size == 1) return get(0).getFormula() else joinToString(" * ", "(", ")") { it.getFormula() } }
+        OperatorType.MIN -> subBitsPackages.minOf { it.getFormula() }
+        OperatorType.MAX -> subBitsPackages.maxOf { it.getFormula() }
+        OperatorType.GREATER -> "[${subBitsPackages[0].getFormula()} > ${subBitsPackages[1].getFormula()}]"
+        OperatorType.LESS -> "[${subBitsPackages[0].getFormula()} < ${subBitsPackages[1].getFormula()}]"
+        OperatorType.EQUAL -> "[${subBitsPackages[0].getFormula()} = ${subBitsPackages[1].getFormula()}]"
+    }
+
+    override fun toString(): String = "Operator($type) {\n\t${subBitsPackages.flatMap { it.toString().split("\n") }.joinToString("\n\t") }\n}"
+}
+
+enum class OperatorType(val id: Int, val aggregate: (input: List<Long>) -> Long) {
+    SUM(0, Iterable<Long>::sum),
+    PRODUCT(1, { it.reduce(Long::times) }),
+    MIN(2, { it.minOf { it } }),
+    MAX(3, { it.maxOf { it } }),
+    GREATER(5, { if(it[0] > it[1]) 1 else 0 }),
+    LESS(6, { if(it[0] < it[1]) 1 else 0 }),
+    EQUAL(7, { if(it[0] == it[1]) 1 else 0 });
+
+    companion object { fun of(ID: Int): OperatorType = values().find { it.id == ID } ?: throw kotlin.AssertionError("OperatorType not found") }
+}
 
 //endregion
 //region Day17
 
-fun day17() {}
+fun day17(inputLines: List<String>) {
+
+}
 
 //endregion
 //region Day18
 
-fun day18() {}
+fun day18(inputLines: List<String>) {}
 
 //endregion
 //region Day19
 
-fun day19() {}
+fun day19(inputLines: List<String>) {}
 
 //endregion
 //region Day20
 
-fun day20() {}
+fun day20(inputLines: List<String>) {}
 
 //endregion
 //region Day21
 
-fun day21() {}
+fun day21(inputLines: List<String>) {}
 
 //endregion
 //region Day22
 
-fun day22() {}
+fun day22(inputLines: List<String>) {}
 
 //endregion
 //region Day23
 
-fun day23() {}
+fun day23(inputLines: List<String>) {}
 
 //endregion
 //region Day24
 
-fun day24() {}
+fun day24(inputLines: List<String>) {}
 
 //endregion
+//region Day25
 
+fun day25(inputLines: List<String>) {}
 
+//endregion
