@@ -9,13 +9,12 @@ import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileReader
-import java.lang.AssertionError
+import java.lang.IllegalStateException
 import java.lang.reflect.Modifier
 import java.time.LocalDateTime
 import java.util.*
-import kotlin.math.abs
-import kotlin.math.min
-import kotlin.math.max
+import kotlin.AssertionError
+import kotlin.math.*
 import kotlin.reflect.KFunction
 import kotlin.reflect.jvm.javaMethod
 import kotlin.reflect.jvm.kotlinFunction
@@ -24,7 +23,7 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.measureTime
 
 const val eventID: String = "2021"
-val daysToRun: List<Int> = listOf(11)
+val daysToRun: List<Int> = listOf()
 
 //region main
 const val sessionCookiePropertyID = "sessionCookie"
@@ -66,7 +65,7 @@ fun getFunctionFromFile(fileName: String, funcName: String): KFunction<*>? {
 fun loadDataForDay(day: Int): List<String> {
     val inputFile = File("./src/main/resources/day$day.txt")
     inputFile.parentFile.mkdirs()
-    if(!inputFile.createNewFile()) return BufferedReader(FileReader("./src/main/resources/day1.txt")).readLines()
+    if(!inputFile.createNewFile()) return BufferedReader(FileReader(inputFile)).readLines()
     val lines = ServerConnector.loadData(day)
     inputFile.writeText(lines.joinToString("\n"))
     return lines
@@ -87,6 +86,9 @@ object ServerConnector {
         return response.split("\n").run { subList(0,size-1) }
     }
 }
+
+//TODO: var watcher with frame -> day registers watcher -> displays current value of watcher
+// |    watcher gets var reference -> loads value via reflection
 
 //endregion
 //region Day1
@@ -1141,29 +1143,636 @@ enum class OperatorType(val id: Int, val aggregate: (input: List<Long>) -> Long)
 //endregion
 //region Day17
 
-fun day17(inputLines: List<String>) {
+val targetX = 230..283
+val targetY = -107..-57
+
+fun day17() {
+    val hitList = mutableListOf<Trajectory>()
+    for (y in abs(targetY.first) downTo targetY.first) {
+        for (x in 0..targetX.last) {
+            Trajectory(x, y).run {
+                if (result == TrajectoryResult.HIT) { hitList.add(this) }
+            }
+        }
+    }
+
+    println("Highest: ${hitList.maxOf { it.positions.maxOf { it.second } }}")
+    println("TrajectoryNum: ${hitList.size}")
+}
+
+/*
+fun day17_2() {
+    var minXTra = 0
+    var maxXTra = 0
+    var maxYTra = abs(targetY.first)-1
+    var yTra = 8
+
+    while(!targetX.contains(minXTra.gaussSum())) { minXTra++ }
+    maxXTra = minXTra
+
+    do {
+        testTrajectory(maxXTra, maxYTra)
+        maxXTra++
+    } while (targetX.contains(maxXTra.gaussSum()))
+
+    //testTrajectory(targetX.first, targetY.first)
+    println("$minXTra, $maxXTra, 8 $maxYTra")
+
+
+    /*
+    while(true) {
+        when(testTrajectory(xTra, yTra, false)) {
+            TrajectoryResult.BELOW -> xTra += 1
+            TrajectoryResult.RIGHT -> break
+            TrajectoryResult.HIT -> { yTra += 1; xTra = 0 }
+        }
+        println()
+    }
+    yTra -= 1
+    xTra = 0
+
+    while(true) {
+        when(testTrajectory(xTra, yTra, false)) {
+            TrajectoryResult.BELOW, TrajectoryResult.HIT -> xTra += 1
+            TrajectoryResult.RIGHT -> { testTrajectory(xTra-1, yTra); println("Found id: ${xTra-1}, $yTra"); break }
+        }
+    }*/
+
+    /*while(true) {
+        println("2 Numbers")
+        val horizontal = readln().toInt()
+        val vertical = readln().toInt()
+        testTrajectory(horizontal, vertical)
+    }*/
 
 }
+
+fun Int.gaussSum() = (this * this + this)/2
+*/
+
+class Trajectory(var horizontal: Int, var vertical: Int) {
+    val positions: List<Pair<Int, Int>>
+    val result: TrajectoryResult
+
+    init {
+        val tempPositions: MutableList<Pair<Int, Int>> = mutableListOf()
+        val probe = Probe().apply { initVelocity(horizontal, vertical) }
+        while(true) {
+            if(probe.yPos < targetY.minOf { it }) { result = TrajectoryResult.BELOW; break }
+            if(probe.xPos > targetX.maxOf { it }) { result = TrajectoryResult.RIGHT; break }
+            if(targetX.contains(probe.xPos) && targetY.contains(probe.yPos)) { result = TrajectoryResult.HIT; break }
+            probe.step()
+            tempPositions.add(probe.xPos to probe.yPos)
+        }
+        positions = tempPositions.toList()
+    }
+
+    fun print(mapStep: Int = 1) {
+        val xMax = (targetX.toList() + positions.map { it.first } + listOf(0)).maxOf { it }
+        val yValues = targetY.toList() + positions.map { it.second } + listOf(0)
+        val yMax = yValues.maxOf { it }
+        val yMin = yValues.minOf { it }
+
+        for(y in yMax downTo yMin step mapStep) {
+            for(x in 0..xMax step mapStep) {
+                if(x == 0 && y == 0) print("S")
+                else if(positions.contains(x to y)) print("#")
+                else if(targetX.contains(x) && targetY.contains(y)) print("T")
+                else print(".")
+            }
+            println()
+        }
+    }
+
+    override fun toString() = "Trajectory(horizontal=$horizontal, vertical=$vertical, returnValue=$result, positions=$positions)"
+}
+
+class Probe {
+    var xPos: Int = 0
+    var yPos: Int = 0
+    var xVel: Int = 0
+    var yVel: Int = 0
+
+    fun initVelocity(horizontal: Int, vertical: Int) {
+        xVel = horizontal
+        yVel = vertical
+    }
+
+    fun step() {
+        xPos += xVel
+        yPos += yVel
+        if(xVel > 0) xVel -= 1
+        if(xVel < 0) xVel += 1
+        yVel -= 1
+    }
+}
+
+enum class TrajectoryResult { BELOW,RIGHT,HIT }
 
 //endregion
 //region Day18
 
-fun day18(inputLines: List<String>) {}
+fun day18(inputLines: List<String>) {
+    val snailFishNumberLRs = inputLines.map { SnailFishNumberLR.of(it) }
+
+    //Test Deserialization, Representation-Transformation, Serialization of Numbers
+    inputLines.zip(snailFishNumberLRs).forEach { (inputLine, snailFishNumber) ->
+        if(inputLine != snailFishNumber.recursiveRepresentation().toString()) throw AssertionError("DRTS-Test failed: $inputLine != ${snailFishNumber.recursiveRepresentation()}")
+    }
+
+    println("Result Magnitude: ${snailFishNumberLRs.reduce(SnailFishNumberLR::plus).magnitude()}")
+
+    val allSums = mutableListOf<SnailFishNumberLR>()
+    for(i in snailFishNumberLRs.indices) {
+        for(j in snailFishNumberLRs.indices) {
+            if(i == j) continue
+            allSums.add((snailFishNumberLRs[i] + snailFishNumberLRs[j]))
+        }
+    }
+    println("Largest Magnitude: ${allSums.map { it.magnitude() }.maxOf { it }}")
+}
+
+class SnailFishNumberLR(private val digits: MutableList<SnailFishNumberLSDigit>) {
+    companion object {
+        fun of(str: String): SnailFishNumberLR {
+            val digitList: MutableList<SnailFishNumberLSDigit> = mutableListOf()
+            var currentDepth = 0
+            val strIterator = str.iterator()
+            while(strIterator.hasNext()) {
+                when(val next = strIterator.next()) {
+                    '[' -> currentDepth++
+                    ']' -> currentDepth--
+                    ',' -> {}
+                    in '0'..'9' -> digitList.add(SnailFishNumberLSDigit(next.digitToInt().toLong(), currentDepth))
+                }
+            }
+            if(currentDepth != 0) throw AssertionError("ParsingError - depth is $currentDepth at end of Formula")
+            return SnailFishNumberLR(digitList)
+        }
+    }
+
+    operator fun plus(other: SnailFishNumberLR) = SnailFishNumberLR((digits + other.digits).map { it.clone() }.onEach { it.depth++ }.toMutableList()).apply { reduce() }
+
+    fun reduce() { @Suppress("ControlFlowWithEmptyBody") while(reduceStep()) { } }
+
+    private fun reduceStep() = tryExplode() || trySplit()
+
+    private fun tryExplode(): Boolean {
+        for((index, digit) in digits.withIndex()) {
+            if(digit.depth > 4 && digit.depth == digits[index+1].depth) {
+                digits.getOrNull(index-1)?.run { value += digit.value } //add to left
+                digits.getOrNull(index+2)?.run { value += digits[index+1].value } //add to right
+
+                digit.run { value = 0; digit.depth-- } //edit first: replace by 0
+                digits.removeAt(index+1) //remove second
+
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun trySplit(): Boolean {
+        for((index, digit) in digits.withIndex()) {
+            if(digit.value >= 10) {
+                val newDepth = digit.depth+1
+                val lowerValue = floor(digit.value.toDouble()/2).toLong()
+                val higherValue = ceil(digit.value.toDouble()/2).toLong()
+
+                digit.run { depth = newDepth; value = lowerValue } //edit first
+                digits.add(index+1, SnailFishNumberLSDigit(higherValue, newDepth)) //add second
+                return true
+            }
+        }
+        return false
+    }
+
+    fun magnitude() = recursiveRepresentation().magnitude()
+
+    fun recursiveRepresentation() = rRInternal()
+
+    //beautiful... naaah!
+    private fun rRInternal(currentIndex: Int = 1, currentDigit: SnailFishNumberLSDigit? = null, nextDigits: Iterator<SnailFishNumberLSDigit> = digits.iterator()): SnailFishNumberRR {
+        var curr = currentDigit ?: if(nextDigits.hasNext()) nextDigits.next() else throw AssertionError("Couldn't parse first element: curI=$currentIndex, curD=$currentDigit, digits=$digits")
+        if(curr.depth == 0) { if(!nextDigits.hasNext()) return curr.toSnailFishRegular() else throw AssertionError("If Number contains depth=0 Digit no other digit may occur! digits=$digits") }
+        val firstContent = if(currentIndex < curr.depth) rRInternal(currentIndex+1, curr, nextDigits) else curr.toSnailFishRegular()
+        if(!nextDigits.hasNext()) throw AssertionError("Couldn't parse second element: first=$firstContent, curI=$currentIndex, curD=$currentDigit, digits=$digits")
+        curr = nextDigits.next()
+        val secondContent = if(currentIndex < curr.depth) rRInternal(currentIndex+1, curr,  nextDigits) else curr.toSnailFishRegular()
+        return SnailFishNumberRRPair(firstContent, secondContent)
+    }
+
+    override fun toString(): String = "SnailFishNumberLR(digits=$digits)"
+}
+
+class SnailFishNumberLSDigit(var value: Long, var depth: Int) {
+    fun toSnailFishRegular() = SnailFishNumberRRDigit(value)
+    override fun toString(): String {
+        return "SFD(v=$value, d=$depth)"
+    }
+    fun clone() = SnailFishNumberLSDigit(value, depth)
+}
+
+interface SnailFishNumberRR {
+    fun magnitude(): Long
+    fun listRepresentation(): SnailFishNumberLR = SnailFishNumberLR(toDigitList().toMutableList())
+    fun toDigitList(): List<SnailFishNumberLSDigit>
+}
+
+class SnailFishNumberRRPair(val first: SnailFishNumberRR, val second: SnailFishNumberRR): SnailFishNumberRR {
+    override fun magnitude(): Long = 3*first.magnitude() + 2*second.magnitude()
+    override fun toString(): String = "[$first,$second]"
+    override fun toDigitList(): List<SnailFishNumberLSDigit> = (first.toDigitList() + second.toDigitList()).onEach { it.depth++ }
+}
+class SnailFishNumberRRDigit(private val value: Long): SnailFishNumberRR {
+    override fun magnitude(): Long = value
+    override fun toString(): String = value.toString()
+    override fun toDigitList(): List<SnailFishNumberLSDigit> = mutableListOf(SnailFishNumberLSDigit(value, 0))
+}
 
 //endregion
 //region Day19
 
-fun day19(inputLines: List<String>) {}
+fun day19(inputLines: List<String>) {
+    val trenchMap = TrenchMap.of(inputLines.iterator())
+
+    println("Number of Beacons: ${trenchMap.beaconPositions.size}")
+    println("Maximum scanner distance: ${trenchMap.maximumScannerDistance()}")
+}
+
+class TrenchMap(scanners: List<Scanner>) {
+    companion object {
+        fun of(input: Iterator<String>): TrenchMap {
+            val scanners = mutableListOf<Scanner>()
+            var beaconPosList = mutableListOf<PositionVektor3D>()
+            while(input.hasNext()) {
+                val next = input.next()
+                when {
+                    next.isBlank() -> scanners.add(Scanner(beaconPosList))
+                    next.contains("---") -> beaconPosList = mutableListOf()
+                    next.contains(",") -> beaconPosList.add(PositionVektor3D.of(next))
+                }
+            }
+            if(beaconPosList.isNotEmpty()) scanners.add(Scanner(beaconPosList))
+            return TrenchMap(scanners)
+        }
+    }
+
+    val scannerPositions = mutableMapOf<PositionVektor3D, Scanner>()
+    val beaconPositions = mutableSetOf<PositionVektor3D>()
+
+    init {
+        println("|---Parsing" + "-".repeat(scanners.size-10) + "|")
+        print("|-")
+
+        val remaining: Queue<Scanner> = LinkedList(scanners)
+        addScanner(remaining.poll(), PositionVektor3D(0,0,0))
+
+        while(remaining.isNotEmpty()) {
+            val next = remaining.poll()
+
+            var matched = false
+            for((knownScannerPos, knownScanner) in scannerPositions) {
+                val nextRelPos = knownScanner.match(next)
+                if(nextRelPos != null) {
+                    print("-")
+                    addScanner(next, knownScannerPos + nextRelPos)
+                    matched = true
+                    break
+                }
+            }
+            if(!matched) remaining.add(next)
+        }
+        println("|")
+        println("|---Done" + "-".repeat(scanners.size-7) + "|")
+        println()
+    }
+
+    private fun addScanner(scanner: Scanner, position: PositionVektor3D) {
+        scannerPositions[position] = scanner
+        scanner.beaconPositions.forEach { relPos -> beaconPositions.add(position + relPos) }
+    }
+
+    fun maximumScannerDistance(): Int {
+        if(scannerPositions.isEmpty()) return -1
+        var currMaxDist: Int = 0
+        for((position1, _) in scannerPositions) {
+            for ((position2, _) in scannerPositions) {
+                currMaxDist = max(position1.hamiltonDistance(position2), currMaxDist)
+            }
+        }
+        return currMaxDist
+    }
+}
+
+class Scanner(val beaconPositions: List<PositionVektor3D>) {
+
+    /**
+     * @returns the relative position if possible
+     */
+    fun match(other: Scanner): PositionVektor3D? {
+        for(rotation in RelativeRotation.all()) {
+            val rotatedOther = other.asRotated(rotation)
+            for (otherBeaconPos in rotatedOther.beaconPositions) {
+                for (myBeaconPos in beaconPositions) {
+                    val relativeScannerPosition = myBeaconPos + otherBeaconPos.asBackwards()
+                    if (verifyPosition(rotatedOther, relativeScannerPosition)) {
+                        other.applyRotation(rotation)
+                        return relativeScannerPosition
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun verifyPosition(other: Scanner, relativeScannerPosition: PositionVektor3D): Boolean {
+        var matchCount = 0
+
+        for (otherBeaconPos in other.beaconPositions) {
+            if (beaconPositions.contains(relativeScannerPosition + otherBeaconPos)) {
+                matchCount++
+            }
+        }
+        return matchCount >= 12
+    }
+
+    fun asRotated(relativeRotation: RelativeRotation) = this.clone().applyRotation(relativeRotation)
+    fun applyRotation(relativeRotation: RelativeRotation): Scanner {
+        return this.turnSideUp(relativeRotation.newTop).rotate(Axis.Z, relativeRotation.rotations)
+    }
+
+    private fun turnSideUp(side: Side): Scanner {
+        when(side) {
+            Side.TOP -> {}
+            Side.BOT -> rotate(Axis.Y, 2) //not same as rotate(Axis.X, 2)
+            Side.LEFT -> rotate(Axis.Y, 1)
+            Side.RIGHT -> rotate(Axis.Y, 3)
+            Side.FRONT -> rotate(Axis.X, 1)
+            Side.BACK -> rotate(Axis.X, 3)
+        }
+        return this
+    }
+
+    private fun rotate(fix: Axis, amount: Int = 1): Scanner {
+        beaconPositions.forEach { it.rotate(fix, amount) }
+        return this
+    }
+
+    fun clone() = Scanner(beaconPositions.map { it.clone() }.toList())
+
+    override fun toString() = "S($beaconPositions)"
+}
+
+class PositionVektor3D(var x: Int, var y: Int, var z: Int) {
+    companion object {
+        fun of(s: String) = s.split(',').map { it.toInt() }.run { PositionVektor3D(get(0), get(1), get(2)) }
+    }
+
+    operator fun plus(other: PositionVektor3D) = PositionVektor3D(x + other.x, y + other.y, z + other.z)
+    operator fun plusAssign(other: PositionVektor3D) {
+        x += other.x
+        y += other.y
+        z += other.z
+    }
+
+    fun asRotated(fix: Axis, amount: Int = 1) = this.clone().rotate(fix, amount)
+    fun rotate(fix: Axis, amount: Int = 1): PositionVektor3D {
+        for (i in 0 until amount) {
+            when(fix) {
+                Axis.X -> y = z.also { z = -y }
+                Axis.Y -> z = x.also { x = -z }
+                Axis.Z -> x = y.also { y = -x }
+            }
+        }
+        return this
+    }
+
+    fun asBackwards() = this.clone().backwards()
+    fun backwards() = this.apply { x*=-1; y*=-1; z*=-1;  }
+
+    fun hamiltonDistance(other: PositionVektor3D): Int = abs(x-other.x) + abs(y-other.y) + abs(z-other.z)
+
+    fun clone() = PositionVektor3D(x,y,z)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as PositionVektor3D
+
+        if (x != other.x) return false
+        if (y != other.y) return false
+        if (z != other.z) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = x
+        result = 31 * result + y
+        result = 31 * result + z
+        return result
+    }
+
+    override fun toString(): String {
+        return "(x=$x, y=$y, z=$z)"
+    }
+}
+
+class RelativeRotation(val newTop: Side, val rotations: Int) {
+    companion object { fun all() = Side.values().flatMap { side -> (0..3).map { RelativeRotation(side, it) } } }
+}
+
+enum class Side { TOP,BOT,LEFT,RIGHT,FRONT,BACK }
+enum class Axis { X,Y,Z }
 
 //endregion
 //region Day20
 
-fun day20(inputLines: List<String>) {}
+fun day20(inputLines: List<String>) {
+    val enhancementStateArray = inputLines.first().toCharArray().map { PixelState.of(it) }.toTypedArray()
+    val initialImage = inputLines.drop(2)
+    val nonCoreState = PixelState.DARK
+
+    val infiniteImage = InfiniteImage.of(initialImage, nonCoreState)
+    var scoreAfter2Enhancements: Any? = null
+
+    println("Initial:")
+    infiniteImage.print()
+    println()
+    for(i in 0 until 50) {
+        println("enhancing: $i")
+        infiniteImage.enhance(enhancementStateArray)
+        infiniteImage.print()
+        if(i == 2) scoreAfter2Enhancements = infiniteImage.getLitPixels()
+        println()
+    }
+    println("Number of Lit Pixels ( 2): $scoreAfter2Enhancements")
+    println("Number of Lit Pixels (50): ${infiniteImage.getLitPixels()}")
+}
+
+class InfiniteImage(private var lightCorePixels: MutableSet<Position2D>, private var nonCoreState: PixelState = PixelState.DARK) {
+    companion object {
+        fun of(value: List<String>, nonCoreState: PixelState = PixelState.DARK): InfiniteImage {
+            val lightCorePixels: MutableSet<Position2D> = mutableSetOf()
+            for((y,line) in value.withIndex()) {
+                for ((x,char) in line.withIndex()) {
+                    if(PixelState.of(char) == PixelState.LIGHT) lightCorePixels.add(Position2D(x,y))
+                }
+            }
+            return InfiniteImage(lightCorePixels, nonCoreState)
+        }
+    }
+
+    private val coreXRange
+        get(): IntRange {
+            //println(lightCorePixels.size)
+            val min = lightCorePixels.minOf { it.x }
+            val max = lightCorePixels.maxOf { it.x }
+            return min..max
+        }
+    private val coreYRange get() = lightCorePixels.minOf { it.y }..lightCorePixels.maxOf { it.y }
+
+    fun getLitPixels() = if(nonCoreState == PixelState.DARK) lightCorePixels.size else Float.POSITIVE_INFINITY
+
+    fun enhance(lookupTable: Array<PixelState>, squareSideLength: Int = 3) {
+        val newLightPixels: MutableSet<Position2D> = mutableSetOf()
+        val cornerOffset = squareSideLength/2
+        for(y in coreYRange.first-cornerOffset..coreYRange.last+cornerOffset) {
+            for(x in coreXRange.first-cornerOffset..coreXRange.last+cornerOffset) {
+                val targetPosition = Position2D(x,y)
+                //val listSquare = getSquareAround(targetPosition)
+                //val ratingSquare = listSquare.stateSquareToRating()
+                //val newState = lookupNewPixel(lookupTable, ratingSquare)
+
+                //println("$targetPosition - $listSquare - $ratingSquare - $newState")
+
+                if(lookupNewPixel(lookupTable, getSquareAround(targetPosition).stateSquareToRating()) == PixelState.LIGHT)
+                    newLightPixels.add(targetPosition)
+            }
+        }
+
+        //println("${coreXRange.first} $squareSideLength - ${coreYRange.first} $squareSideLength")
+        val outsidePosition = Position2D(coreXRange.first-squareSideLength, coreYRange.first-squareSideLength)
+
+        nonCoreState = lookupNewPixel(lookupTable, getSquareAround(outsidePosition).stateSquareToRating())
+        lightCorePixels = newLightPixels
+    }
+
+    private fun lookupNewPixel(lookupTable: Array<PixelState>, number: Int) = lookupTable.getOrNull(number) ?: throw IllegalStateException(
+        if((0 until 512).contains(number)) "Lookup failed: lookupTable too small: ${lookupTable.size}"
+        else "Lookup failed: number out of range $number"
+    )
+
+    private fun getState(position: Position2D): PixelState {
+        if(!isCore(position)) return nonCoreState
+        if(lightCorePixels.contains(position)) return PixelState.LIGHT
+        return PixelState.DARK
+    }
+
+    private fun getSquareAround(center: Position2D, sideLength: Int = 3): List<PixelState> {
+        val resultingStates = mutableListOf<PixelState>()
+        val cornerOffset = sideLength/2
+        for (y in center.y-cornerOffset..center.y+cornerOffset) {
+            for (x in center.x-cornerOffset..center.x+cornerOffset) {
+                resultingStates.add(getState(Position2D(x,y)))
+            }
+        }
+        return resultingStates.toList()
+    }
+
+    private fun List<PixelState>.stateSquareToRating() = map { if(it == PixelState.LIGHT) '1' else '0' }.joinToString("").toInt(2)
+
+    private fun isCore(position: Position2D): Boolean = coreXRange.contains(position.x) && coreYRange.contains(position.y)
+
+    fun print() {
+        for(y in coreYRange) {
+            for(x in coreXRange) {
+                print(if(getState(Position2D(x,y)) == PixelState.LIGHT) '#' else '.')
+            }
+            println()
+        }
+        //println(this)
+    }
+
+    override fun toString(): String {
+        return "InfiniteImage(lightCorePixels=$lightCorePixels, nonCoreState=$nonCoreState)"
+    }
+}
+
+class Position2D(val x: Int, val y: Int) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as Position2D
+
+        if (x != other.x) return false
+        if (y != other.y) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = x
+        result = 31 * result + y
+        return result
+    }
+
+    override fun toString(): String {
+        return "Position2D(x=$x, y=$y)"
+    }
+}
+
+enum class PixelState {
+    LIGHT, DARK;
+    companion object { fun of(value: Char) = if(value == '.') DARK else LIGHT }
+}
 
 //endregion
 //region Day21
 
-fun day21(inputLines: List<String>) {}
+//Player 1 starting position: 1
+//Player 2 starting position: 6
+
+fun day21() {
+    var p1Points = 0
+    var p1Position = 0
+    var p2Points = 0
+    var p2Position = 5
+
+    var rollCounter = 0
+    var p1Turn = true
+    var currDiceValue = 0
+
+    while(p1Points<1000 && p2Points<1000) {
+        var currentRollResult = 0
+        for(i in 0 until 3) {
+            currentRollResult += currDiceValue + 1
+            currDiceValue = (currDiceValue + 1) % 100
+            rollCounter++
+        }
+        if(p1Turn) {
+            p1Position = (p1Position + currentRollResult) % 10
+            p1Points += p1Position + 1
+        } else {
+            p2Position = (p2Position + currentRollResult) % 10
+            p2Points += p2Position + 1
+        }
+        p1Turn = !p1Turn
+    }
+
+    if(p1Points > p2Points) {
+        println("P1 Won")
+        println("Metric: ${p2Points*rollCounter}")
+    } else {
+        println("P2 Won")
+        println("Metric: ${p1Points*rollCounter}")
+    }
+}
+
+
 
 //endregion
 //region Day22
