@@ -4,16 +4,17 @@ import InsertionRule.Companion.toInsertionRule
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
+import io.ktor.utils.io.bits.*
 import io.ktor.utils.io.errors.*
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileReader
-import java.lang.IllegalStateException
 import java.lang.reflect.Modifier
 import java.time.LocalDateTime
 import java.util.*
 import kotlin.AssertionError
+import kotlin.IllegalStateException
 import kotlin.math.*
 import kotlin.reflect.KFunction
 import kotlin.reflect.jvm.javaMethod
@@ -23,7 +24,7 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.measureTime
 
 const val eventID: String = "2021"
-val daysToRun: List<Int> = listOf()
+val daysToRun: List<Int> = listOf(23)
 
 //region main
 const val sessionCookiePropertyID = "sessionCookie"
@@ -43,10 +44,11 @@ fun main(args: Array<String>) {
 fun executeDay(day: Int) {
     println("-".repeat(50))
     println("Day $day")
-    val func: KFunction<*>? = getFunctionFromFile("Main", "day$day")
+    val func: KFunction<*> = getFunctionFromFile("Main", "day$day")
         ?: getFunctionFromFile("Day$day", "day$day")
-        ?: run { println("Method not found for day: $day"); null }
-    val time = if(func?.parameters?.size == 1) measureTime { func.call(loadDataForDay(day)) } else measureTime { func?.call() }
+        ?: run { println("Method not found for day: $day"); return }
+    val data = if(func.parameters.size == 1) loadDataForDay(day) else null
+    val time = data?.let { measureTime { func.call(it) } } ?: measureTime { func.call() }
     println(time.toComponents { hours, minutes, seconds, nanoseconds -> "Exec Time: " +
             "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:" +
             "${seconds.toString().padStart(2, '0')}.${nanoseconds.toString().padStart(9, '0')}"
@@ -88,7 +90,7 @@ object ServerConnector {
 }
 
 //TODO: var watcher with frame -> day registers watcher -> displays current value of watcher
-// |    watcher gets var reference -> loads value via reflection
+// |    watcher gets var reference -> loads value via reflection concurrently
 
 //endregion
 //region Day1
@@ -98,13 +100,22 @@ fun day1(inputLines: List<String>) {
     println("Part2: ${calcDay1(inputLines, 3)}")
 }
 
-fun calcDay1(inputLines: List<String>, windowSize: Int = 1): Int {
+fun calcDay1(inputLines: List<String>, windowSize: Int = 1): Int =
+    inputLines.asSequence()
+        .map { it.toInt() }
+        .windowed(windowSize)
+        .windowed(2)
+        .map { (first, second) -> first.sum() < second.sum() }
+        .count { it }
+/*
+{
     var counter = 0
     for (i in 0 until inputLines.size-windowSize) {
         if(inputLines.subList(i, i+windowSize).sumOf { it.toInt() } < inputLines.subList(i+1, i+windowSize+1).sumOf { it.toInt() }) counter++
     }
     return counter
 }
+*/
 
 //endregion
 //region Day2
@@ -1737,6 +1748,139 @@ enum class PixelState {
 //Player 2 starting position: 6
 
 fun day21() {
+    val initialGameState = GameState(
+        listOf(
+            PlayerState(0, 0),
+            PlayerState(0, 5),
+        ),
+        0
+    )
+
+    //beautiful blob of code
+    val usedDeterministicDice = DeterministicDice()
+    val deterministicResults = GameController.executeDeterministicGame(initialGameState, 1000, dice = usedDeterministicDice)
+        .mapIndexed { index, player -> (index+1) to player.points }
+    println("DeterministicDice - Results are:")
+    deterministicResults.forEach { (playerID, points) -> println("Player $playerID: $points Points") }
+    val sortedDeterministicResults = deterministicResults.sortedByDescending { it.second }
+    sortedDeterministicResults.firstOrNull()?.run { println("And the winner is: Player $first with $second Points") }
+        ?: println("Winner couldn't be determined!")
+    sortedDeterministicResults.lastOrNull()?.run { println("Metric is: ${usedDeterministicDice.numberOfRolls * second }") }
+        ?: println("Loser couldn't be determined! Therefore Metric couldn't be calculated!")
+
+    println()
+
+    //another beautiful blob of code
+    val diracResults = GameController.executeDiracGame(initialGameState, 21)
+        .mapIndexed { index, points -> (index+1) to points }
+    println("DiracDie - Results are:")
+    diracResults.forEach { (playerID, points) -> println("Player $playerID: $points Wins") }
+    val diracWinner = diracResults.maxByOrNull { it.second }
+    if(diracWinner != null) println("And the winner is: Player ${diracWinner.first} with ${diracWinner.second} Wins")
+    else println("There is no winner!")
+}
+
+object GameController {
+
+    fun executeDeterministicGame(initialState: GameState, minPointsToWin: Int, boardSize: Int = 10, dice: DeterministicDice = DeterministicDice()): List<PlayerState> {
+        var currentGameState: GameState = initialState
+
+        while(currentGameState.players.indexOfFirst { it.points >= minPointsToWin } == -1) {
+            currentGameState = executeState(currentGameState, dice, boardSize)
+                .firstNotNullOfOrNull { if(it.second == 1L) it.first else null }
+                ?: throw IllegalStateException("deterministic dice should always return 1 Universe")
+        }
+
+        return currentGameState.players
+    }
+
+    fun executeDiracGame(initialState: GameState, minPointsToWin: Int, boardSize: Int = 10): List<Long> {
+        val winCounter = MutableList(initialState.players.size) { 0L }
+        val pendingStates: MutableMap<GameState, Long> = mutableMapOf(initialState to 1L)
+
+        while(pendingStates.isNotEmpty()) {
+            //println(pendingStates.size)
+            val (nextState, nextEncodedGameCount) = pendingStates.entries.first()
+            pendingStates.remove(nextState) ?: throw AssertionError("has to be removed $nextState should have been in $pendingStates")
+
+            val winnerIndex = nextState.players.indexOfFirst { it.points >= minPointsToWin }
+            if(winnerIndex != -1) {
+                winCounter[winnerIndex] += nextEncodedGameCount
+                continue
+            }
+
+            executeState(nextState, DiracDie, boardSize).forEach { (resultingState, multiplicity) ->
+                val oldMultiplicity = pendingStates.getOrDefault(resultingState, 0L)
+                pendingStates[resultingState] = oldMultiplicity + multiplicity * nextEncodedGameCount
+            }
+        }
+
+        return winCounter
+    }
+
+    fun executeState(state: GameState, dice: Dice, boardSize: Int = 10): List<Pair<GameState, Long>> =
+        dice.rollThreeTimes().map { (diceValue, diceValueMultiplicity) ->
+            GameState(
+                state.players.mapIndexed { index, player ->
+                    var points = player.points
+                    var position = player.position
+
+                    if(index == state.currPlayerIndex) {
+                       position = (position + diceValue) % boardSize
+                       points += position + 1
+                    }
+
+                    PlayerState(points, position)
+                },
+                (state.currPlayerIndex + 1) % state.players.size,
+            ) to diceValueMultiplicity.toLong()
+        }
+}
+
+interface Dice {
+    fun rollThreeTimes(): List<Pair<Int, Int>>
+}
+
+class DeterministicDice(initValue: Int = 0, val numberOfValues: Int = 100): Dice {
+    var lastValue = initValue % numberOfValues
+    var numberOfRolls = 0
+
+    override fun rollThreeTimes(): List<Pair<Int, Int>> = listOf(
+        (rollOnce() + rollOnce() + rollOnce()) to 1
+    )
+
+    private fun rollOnce(): Int {
+        lastValue = (lastValue + 1) % numberOfValues
+        numberOfRolls++
+        return lastValue
+    }
+
+}
+
+object DiracDie: Dice {
+    override fun rollThreeTimes() = listOf(
+        3 to 1,
+        4 to 3,
+        5 to 6,
+        6 to 7,
+        7 to 6,
+        8 to 3,
+        9 to 1,
+    )
+}
+
+data class GameState(
+    val players: List<PlayerState>,
+    val currPlayerIndex: Int,
+)
+
+data class PlayerState(
+    val points: Int,
+    val position: Int,
+)
+
+/*
+fun day21_1() {
     var p1Points = 0
     var p1Position = 0
     var p2Points = 0
@@ -1771,18 +1915,263 @@ fun day21() {
         println("Metric: ${p1Points*rollCounter}")
     }
 }
-
+*/
 
 
 //endregion
 //region Day22
 
-fun day22(inputLines: List<String>) {}
+fun day22(inputLines: List<String>) {
+    val instructions = inputLines.map {
+        val (state, rangeX, rangeY, rangeZ) = it.split(" ", ",")
+
+        ReactorInstruction(
+            ReactorNodeState.valueOf(state.uppercase()),
+            Cube(
+                SimpleIntRange.of(rangeX.substring(2)),
+                SimpleIntRange.of(rangeY.substring(2)),
+                SimpleIntRange.of(rangeZ.substring(2)),
+            ),
+        )
+    }
+
+    for(instruction in instructions.take(20)) { ReactorController.executeInstruction(instruction) }
+    println("On after 20 instructions: ${ReactorController.activatedNodes}")
+
+    for(instruction in instructions.drop(20)) { ReactorController.executeInstruction(instruction) }
+    println("On after all instructions: ${ReactorController.activatedNodes}")
+}
+
+object ReactorController {
+    private val fixedNodeCubes: MutableList<BreakableCube> = mutableListOf()
+
+    val activatedNodes get() = fixedNodeCubes.map { it.size }.reduce(Long::plus)
+
+    fun executeInstruction(instruction: ReactorInstruction) {
+        when(instruction.targetState) {
+            ReactorNodeState.ON -> {
+                val instructionCube = BreakableCube(instruction.targetArea)
+                for(fixed in fixedNodeCubes) {
+                    instructionCube.breakRespecting(fixed)
+                }
+                fixedNodeCubes.add(instructionCube)
+            }
+            ReactorNodeState.OFF -> {
+                for(fixed in fixedNodeCubes) {
+                    fixed.removeAt(instruction.targetArea)
+                }
+            }
+        }
+    }
+}
+
+class BreakableCube(val base: Cube) {
+    private val ignoredParts: MutableList<BreakableCube> = mutableListOf()
+
+    val size: Long get() = base.size - (ignoredParts.map { it.size }.reduceOrNull(Long::plus) ?: 0L)
+
+    /**
+     * Assumes that the fixed Cube already broke (or broke by) every cube that previously broke this cube
+     */
+    fun breakRespecting(fixed: BreakableCube) {
+        if(!base.intersects(fixed.base)) return
+
+        val baseIntersection = BreakableCube(base.intersection(fixed.base))
+
+        for (fixedIgnoredPart in fixed.ignoredParts) {
+            baseIntersection.breakRespecting(fixedIgnoredPart)
+        }
+
+        ignoredParts.add(baseIntersection)
+    }
+
+    fun removeAt(target: Cube) {
+        if(!base.intersects(target)) return
+
+        val targetIntersection = BreakableCube(base.intersection(target))
+
+        for (ignoredPart in ignoredParts) {
+            targetIntersection.breakRespecting(ignoredPart)
+        }
+
+        ignoredParts.add(targetIntersection)
+    }
+}
+
+data class ReactorInstruction(
+    val targetState: ReactorNodeState,
+    val targetArea: Cube,
+)
+
+enum class ReactorNodeState { ON, OFF }
+
+data class Cube(
+    val xRange: SimpleIntRange,
+    val yRange: SimpleIntRange,
+    val zRange: SimpleIntRange,
+) {
+    val size: Long get() = xRange.size * yRange.size * zRange.size
+
+    fun contains(point3d: Point3d): Boolean = xRange.contains(point3d.x) && yRange.contains(point3d.y) && zRange.contains(point3d.z)
+    fun intersects(other: Cube): Boolean = xRange.intersects(other.xRange) && yRange.intersects(other.yRange) && zRange.intersects(other.zRange)
+
+    fun intersection(other: Cube): Cube = Cube(xRange.intersection(other.xRange), yRange.intersection(other.yRange), zRange.intersection(other.zRange))
+}
+
+data class Point3d(
+    val x: Int,
+    val y: Int,
+    val z: Int,
+)
+
+class SimpleIntRange(
+    val first: Int,
+    val last: Int,
+) {
+    companion object {
+        fun of(s: String): SimpleIntRange {
+            val (first,last) = s.split("..")
+            return SimpleIntRange(first.toInt(), last.toInt())
+        }
+    }
+
+    val size: Long get() = last.toLong() - first.toLong() + 1L
+
+    fun intersects(other: SimpleIntRange): Boolean = max(first, other.first) <= min(last, other.last)
+    fun contains(value: Int): Boolean = value in first..last
+    fun isEmpty() = first > last
+    fun isNotEmpty() = !isEmpty()
+
+    fun intersection(other: SimpleIntRange): SimpleIntRange = SimpleIntRange(max(first, other.first), min(last, other.last))
+
+    override fun equals(other: Any?): Boolean =
+        other is IntRange && (isEmpty() && other.isEmpty() || first == other.first && last == other.last)
+
+    override fun hashCode(): Int {
+        var result = first
+        result = 31 * result + last
+        return result
+    }
+}
+
+/*
+fun day22_1_2test(inputLines: List<String>) {
+    //1
+    val instructions = inputLines.map {
+        val (state, rangeX, rangeY, rangeZ) = it.split(" ", ",")
+
+        ReactorInstruction(
+            ReactorNodeState.valueOf(state.uppercase()),
+            Cube(
+                SimpleIntRange.of(rangeX.substring(2)),
+                SimpleIntRange.of(rangeY.substring(2)),
+                SimpleIntRange.of(rangeZ.substring(2)),
+            ),
+        )
+    }
+
+    //3 loops -> find actual value from bottom to top in instructions -> add it to counter of that value (ON-counter, OFF-counter)
+    val reversedInstructions = instructions.reversed()
+    var onCounter = 0
+    var offCounter = 0
+
+    for(x in -50..50) {
+        for(y in -50..50) {
+            point@for(z in -50..50) {
+                val point = Point3d(x,y,z)
+                for(instruction in reversedInstructions) {
+                    if(instruction.targetArea.contains(point)) {
+                        when(instruction.targetState) {
+                            ReactorNodeState.ON -> { onCounter++; continue@point }
+                            ReactorNodeState.OFF -> { offCounter++; continue@point }
+                        }
+                    }
+                }
+                offCounter++
+            }
+        }
+    }
+
+    println("On: $onCounter")
+    println("Off: $offCounter")
+    println("Sum is 1030301 (101*101*101)? ${onCounter + offCounter == 1030301}")
+
+    //2test
+    var max = 0
+    var sum = 0
+    for((baseCounter, baseInstruction) in instructions.withIndex()) {
+        print("$baseCounter -> ")
+        var intersectCount = 0;
+        for(otherInstruction in instructions) {
+            //print("piep")
+            if(baseInstruction.targetArea.intersects(otherInstruction.targetArea)) {
+                //print("++")
+                intersectCount++
+            }
+            //println()
+        }
+        sum += intersectCount
+        print(intersectCount)
+        if(intersectCount >= max) {
+            println(" NEWMAX")
+            max = intersectCount
+        }
+        else println()
+    }
+    println("Sum: $sum")
+
+}
+*/
 
 //endregion
 //region Day23
 
-fun day23(inputLines: List<String>) {}
+/*
+#############
+#...........#
+###D#C#A#B###
+  #C#D#A#B#
+  #########
+*/
+
+fun day23() {
+    val initialState = listOf(
+        Amphipod(AmphipodId.A,AmphipodPosition.ROOM_C1), Amphipod(AmphipodId.A,AmphipodPosition.ROOM_C2),
+        Amphipod(AmphipodId.B,AmphipodPosition.ROOM_D1), Amphipod(AmphipodId.B,AmphipodPosition.ROOM_D1),
+        Amphipod(AmphipodId.C,AmphipodPosition.ROOM_A2), Amphipod(AmphipodId.C,AmphipodPosition.ROOM_B1),
+        Amphipod(AmphipodId.D,AmphipodPosition.ROOM_A1), Amphipod(AmphipodId.D,AmphipodPosition.ROOM_B2),
+    )
+
+
+}
+
+data class Amphipod(
+    val id: AmphipodId,
+    val position: AmphipodPosition,
+)
+
+enum class AmphipodId(val scoreMultiplicator: Int) {
+    A(1),
+    B(10),
+    C(100),
+    D(1000)
+}
+
+enum class AmphipodPosition {
+    HW_A1, HW_A2,
+    ROOM_A1, ROOM_A2,
+    HW_AB,
+    ROOM_B1, ROOM_B2,
+    HW_BC,
+    ROOM_C1, ROOM_C2,
+    HW_CD,
+    ROOM_D1, ROOM_D2,
+    HW_D1, HW_D2,
+    ;
+}
+
+
+
 
 //endregion
 //region Day24
