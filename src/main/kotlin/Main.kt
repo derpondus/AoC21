@@ -15,7 +15,7 @@ import kotlin.reflect.jvm.kotlinFunction
 import kotlin.time.ExperimentalTime
 import kotlin.time.measureTime
 
-val daysToRun: List<String> = listOf("2023:12") //"2023:5"
+val daysToRun: List<String> = listOf() //"2023:12"
 
 //region main
 const val sessionCookiePropertyID = "sessionCookie"
