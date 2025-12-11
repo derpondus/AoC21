@@ -21,6 +21,8 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:$ktorVersion")
     implementation("io.ktor:ktor-client-logging:$ktorVersion")
     implementation("io.ktor:ktor-client-serialization:$ktorVersion")
+
+    implementation("com.gurobi:gurobi:12.0.0")
 }
 
 tasks.test {

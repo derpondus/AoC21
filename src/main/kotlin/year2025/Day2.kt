@@ -53,7 +53,7 @@ fun day2(inputLines: List<String>) {
     println("[Part2] Number of matches: $pt2Sum")
     // (1)  5_147_024_348 (too low) (should have known that: it's lower than part 1)
     // app1 -> app2
-    // (_)  4_951_403_915 (def too low) (ignored splits int two parts (off by one))
+    // (_)  4_951_403_915 (def too low) (ignores splits into two parts (off by one))
     // (2) 19_058_204_438 (correct)
 }
 

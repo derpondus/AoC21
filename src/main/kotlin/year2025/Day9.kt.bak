@@ -1,0 +1,182 @@
+package year2025
+
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+data class Pos2D(val x: Long, val y: Long)
+data class Line2D(val pos1: Pos2D, val pos2: Pos2D) {
+    val alignment by lazy { if (pos1.x == pos2.x) Alignment.Vertical else Alignment.Horizontal }
+
+    fun coincides(other: Pos2D): Boolean {
+        return pos1 == other || pos2 == other
+    }
+
+    fun intersects(other: Pos2D): Boolean {
+        return if (alignment == Alignment.Vertical) {
+            pos1.x == other.x && min(pos1.y, pos2.y) <= other.y && max(pos1.y, pos2.y) >= other.y
+        } else {
+            pos1.y == other.y && min(pos1.x, pos2.x) <= other.x && max(pos1.x, pos2.x) >= other.x
+        }
+    }
+
+    fun coincides(other: Line2D): Boolean {
+        return coincides(other.pos1) || coincides(other.pos2)
+    }
+
+    fun intersects(other: Line2D): Boolean {
+        if (alignment == other.alignment) {
+            return intersects(other.pos1) || intersects(other.pos2) || other.intersects(pos1)
+        }
+
+        return if (alignment == Alignment.Vertical) {
+            intersectUnaligned(this, other)
+        } else {
+            intersectUnaligned(other, this)
+        }
+    }
+
+    private fun intersectUnaligned(vert: Line2D, hori: Line2D): Boolean {
+        val minVertYBelowHori = min(vert.pos1.y, vert.pos2.y) <= hori.pos1.y
+        val maxVertYAboveHori = max(vert.pos1.y, vert.pos2.y) >= hori.pos1.y
+        val minHoriXBelowVert = min(hori.pos1.x, hori.pos2.x) <= vert.pos1.x
+        val maxHoriXAboveVert = max(hori.pos1.x, hori.pos2.x) >= vert.pos1.x
+
+        return minVertYBelowHori && maxVertYAboveHori && minHoriXBelowVert && maxHoriXAboveVert
+    }
+
+    enum class Alignment {
+        Horizontal,
+        Vertical
+    }
+}
+data class Rect2D(val pos1: Pos2D, val pos2: Pos2D) {
+    val area by lazy { (abs(pos1.x - pos2.x) + 1) * (abs(pos1.y - pos2.y) + 1) }
+
+    fun intersectsInner(other: Line2D): Boolean {
+        if (other.alignment == Line2D.Alignment.Vertical) {
+            val botInnerLine = Line2D(
+                Pos2D(min(pos1.x, pos2.x)+1, min(pos1.y, pos2.y)+1),
+                Pos2D(max(pos1.x, pos2.x)-1, min(pos1.y, pos2.y)+1)
+            )
+            val topInnerLine = Line2D(
+                Pos2D(min(pos1.x, pos2.x)+1, max(pos1.y, pos2.y)-1),
+                Pos2D(max(pos1.x, pos2.x)-1, max(pos1.y, pos2.y)-1)
+            )
+            return botInnerLine.intersects(other) || topInnerLine.intersects(other)
+        } else {
+            val leftInnerLine = Line2D(
+                Pos2D(min(pos1.x, pos2.x)+1, min(pos1.y, pos2.y)+1),
+                Pos2D(min(pos1.x, pos2.x)+1, max(pos1.y, pos2.y)-1)
+            )
+            val rightInnerLine = Line2D(
+                Pos2D(max(pos1.x, pos2.x)-1, min(pos1.y, pos2.y)+1),
+                Pos2D(max(pos1.x, pos2.x)-1, max(pos1.y, pos2.y)-1)
+            )
+            return leftInnerLine.intersects(other) || rightInnerLine.intersects(other)
+        }
+    }
+
+    // inside border-half-spaces + no intersecting lines
+}
+data class HalfSpace(val borderSegment: Line2D, val inside: Side = Side.Left) {
+    fun contains(pos: Pos2D): Boolean {
+        if (borderSegment.alignment == Line2D.Alignment.Vertical) {
+            return if ((borderSegment.pos1.y < borderSegment.pos2.y) == (inside == Side.Left)) {
+                // smaller coords are inside
+                pos.x <= borderSegment.pos1.x
+            } else {
+                // larger coords are inside
+                pos.x >= borderSegment.pos1.x
+            }
+        } else {
+            return if ((borderSegment.pos1.x < borderSegment.pos2.x) == (inside == Side.Left)) {
+                // larger coords are inside
+                pos.y >= borderSegment.pos1.y
+            } else {
+                // smaller coords are inside
+                pos.y <= borderSegment.pos1.y
+            }
+        }
+    }
+
+    fun contains(rect: Rect2D): Boolean = contains(rect.pos1) && contains(rect.pos2)
+
+    enum class Side {
+        Left,
+        Right
+    }
+}
+
+fun day9(inputLines: List<String>) {
+    val positions = inputLines
+        .map { it.split(",") }
+        .map { Pos2D(it[0].toLong(), it[1].toLong()) }
+    val lines = (positions + positions.first())
+        .zipWithNext()
+        .map { (pos1, pos2) -> Line2D(pos1, pos2) }
+
+    testIntersectLines(lines)  // the lines dont intersect!
+
+    val rects = positions
+        .flatMapIndexed { idx, pos1 -> positions.drop(idx + 1).map { pos2 -> Rect2D(pos1, pos2) } }
+        .sortedByDescending { it.area }
+    println(rects.map { "$it, ${it.area}" })
+
+    println("[Part1] Largest unconstrained area: ${rects.first().area}")
+    // 4740017887 (too low) (didn't account for BOTH positions to be inclusive)
+    // 4740155680 (correct)
+
+    //val halfSpaces = lines.map { HalfSpace(it) }
+
+    val p2Rects = rects.filter { rect ->
+
+        val intersectsInner = lines.any { rect.intersectsInner(it) }
+        val insideBorderSpaces = listOf(
+            positions.indexOf(rect.pos1),
+            Math.floorMod(positions.indexOf(rect.pos1)-1, positions.size),
+            positions.indexOf(rect.pos2),
+            Math.floorMod(positions.indexOf(rect.pos2)-1, positions.size),
+        ).map { HalfSpace(lines[it]).contains(rect) }
+
+        !intersectsInner && insideBorderSpaces.all { it }
+    }
+
+    //val rect = rects[12]
+    //val intersectsInner = lines.filter { rect.intersectsInner(it) }
+    //val insideBorderSpaces = listOf(
+    //    positions.indexOf(rect.pos1),
+    //    Math.floorMod(positions.indexOf(rect.pos1)-1, positions.size),
+    //    positions.indexOf(rect.pos2),
+    //    Math.floorMod(positions.indexOf(rect.pos2)-1, positions.size),
+    //).map { HalfSpace(lines[it]).contains(rect) }
+    //println("$intersectsInner, $insideBorderSpaces")
+
+    println("[Part2] Largest constrained area: ${p2Rects.firstOrNull()?.area}")
+    // (_) 4740155680 (pt1 comparison (pt2 needs to be smaller))
+    // (1) 274273475  (too low)
+    //
+}
+
+fun testIntersectLines(lines: List<Line2D>) {
+    val linepairs = lines.flatMapIndexed { idx, line -> lines.drop(idx+2).map { line to it } }
+    val badPairs = linepairs
+        .filter { (l1, l2) -> l1.intersects(l2) }
+        .dropWhile { it.first == lines.first() && it.second == lines.last() }
+    if(badPairs.isEmpty()) println("Lines dont intersect!")
+    else println("Intersecting, non-consecutive lines: $badPairs")
+}
+
+val testCases = mapOf(
+    listOf("0,0", "10,0", "10,4", "15,4", "15,6", "10,6", "10,10", "0,10") to 121,
+    //listOf( "1,0", "3,0", "3,6", "16,6", "16,0", "18,0", "18,9", "13,9", "13,7", "6,7", "6,9", "1,9") to 30,
+    //listOf("2,2", "5,2", "5,0", "7,0", "7,2", "9,2", "9,6", "7,6", "7,10", "4,10", "4,12", "2,12", "2,10", "0,10", "0,6") to 54,
+    //listOf("0,3", "0,0", "10,0", "10,10", "0,10", "0,7", "6,7", "6,3") to 44
+)
+
+fun main() {
+    for ((input, output) in testCases) {
+        day9(input)
+        println("Correct output: $output")
+    }
+}
