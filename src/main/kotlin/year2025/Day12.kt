@@ -1,8 +1,5 @@
 package year2025
 
-import kotlin.math.max
-import kotlin.math.min
-
 fun day12(inputLines: List<String>) {
     val data = inputLines
 
