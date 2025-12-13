@@ -4,9 +4,7 @@ import com.gurobi.gurobi.GRBLinExpr
 import com.gurobi.gurobi.GRBModel
 import com.gurobi.gurobi.GRBVar
 
-val AOC_GUROBI_ENV by lazy { GRBEnv("LOG_AOC_GUROBI").apply {
-    set(GRB.IntParam.OutputFlag, 0)
-} }
+val AOC_GUROBI_ENV by lazy { GRBEnv("LOG_AOC_GUROBI") }
 
 // Constraint building (Python style with operator overloading)
 
